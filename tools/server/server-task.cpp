@@ -566,14 +566,16 @@ json server_task_result_cmpl_final::to_json_oaicompat_resp() {
     }
 
     for (const common_chat_tool_call & tool_call : oaicompat_msg.tool_calls) {
-        output.push_back(json {
+        json output_item = {
             {"id",        "fc_" + tool_call.id},
             {"type",      "function_call"},
             {"status",    "completed"},
             {"arguments", tool_call.arguments},
             {"call_id",   "call_" + tool_call.id},
             {"name",      tool_call.name},
-        });
+        };
+        server_chat_restore_responses_tool_namespace(output_item, oai_resp_namespace_tool_map);
+        output.push_back(std::move(output_item));
     }
 
     std::time_t t = std::time(0);
@@ -666,7 +668,7 @@ json server_task_result_cmpl_final::to_json_oaicompat_resp_stream() {
     }
 
     for (const common_chat_tool_call & tool_call : oaicompat_msg.tool_calls) {
-        const json output_item = {
+        json output_item = {
             {"id",        "fc_" + tool_call.id},
             {"type",      "function_call"},
             {"status",    "completed"},
@@ -674,6 +676,7 @@ json server_task_result_cmpl_final::to_json_oaicompat_resp_stream() {
             {"call_id",   "call_" + tool_call.id},
             {"name",      tool_call.name}
         };
+        server_chat_restore_responses_tool_namespace(output_item, oai_resp_namespace_tool_map);
         server_sent_events.push_back(json {
             {"event", "response.output_item.done"},
             {"data", json {
@@ -1271,18 +1274,20 @@ json server_task_result_cmpl_partial::to_json_oaicompat_resp() {
         }
 
         if (!diff.tool_call_delta.name.empty()) {
+            json output_item = {
+                {"id",        "fc_" + diff.tool_call_delta.id},
+                {"arguments", ""},
+                {"call_id",   "call_" + diff.tool_call_delta.id},
+                {"name",      diff.tool_call_delta.name},
+                {"type",      "function_call"},
+                {"status",    "in_progress"},
+            };
+            server_chat_restore_responses_tool_namespace(output_item, oai_resp_namespace_tool_map);
             events.push_back(json {
                 {"event", "response.output_item.added"},
                 {"data", json {
                     {"type",  "response.output_item.added"},
-                    {"item", json {
-                        {"id",        "fc_" + diff.tool_call_delta.id},
-                        {"arguments", ""},
-                        {"call_id",   "call_" + diff.tool_call_delta.id},
-                        {"name",      diff.tool_call_delta.name},
-                        {"type",      "function_call"},
-                        {"status",    "in_progress"},
-                    }},
+                    {"item", std::move(output_item)},
                 }},
             });
             oai_resp_fc_id = diff.tool_call_delta.id;

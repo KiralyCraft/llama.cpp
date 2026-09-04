@@ -2,6 +2,34 @@
 #include "server-common.h"
 
 #include <sstream>
+#include <unordered_set>
+
+static std::string flatten_responses_namespace_tool_name(
+        const std::string & namespace_name,
+        const std::string & tool_name) {
+    return namespace_name + "__" + tool_name;
+}
+
+void server_chat_restore_responses_tool_namespace(json & tool_call, const json & namespace_tool_map) {
+    if (!tool_call.contains("name") || !tool_call.at("name").is_string() || !namespace_tool_map.is_object()) {
+        return;
+    }
+
+    const std::string flattened_name = tool_call.at("name").get<std::string>();
+    if (!namespace_tool_map.contains(flattened_name) || !namespace_tool_map.at(flattened_name).is_object()) {
+        return;
+    }
+
+    const json & mapping = namespace_tool_map.at(flattened_name);
+    const std::string namespace_name = json_value(mapping, "namespace", std::string());
+    const std::string tool_name = json_value(mapping, "name", std::string());
+    if (namespace_name.empty() || tool_name.empty()) {
+        return;
+    }
+
+    tool_call["namespace"] = namespace_name;
+    tool_call["name"] = tool_name;
+}
 
 json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
     if (!response_body.contains("input")) {
@@ -167,10 +195,17 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
                 item.at("type") == "function_call"
             ) {
                 // #responses_create-input-input_item_list-item-function_tool_call
+                std::string tool_name = item.at("name").get<std::string>();
+                if (exists_and_is_string(item, "namespace")) {
+                    tool_name = flatten_responses_namespace_tool_name(
+                        item.at("namespace").get<std::string>(),
+                        tool_name);
+                }
+
                 json tool_call = {
                     {"function", json {
                         {"arguments", item.at("arguments")},
-                        {"name",      item.at("name")},
+                        {"name",      tool_name},
                     }},
                     {"id",   item.at("call_id")},
                     {"type", "function"},
@@ -254,27 +289,69 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
             throw std::invalid_argument("'tools' must be an array of objects");
         }
         std::vector<json> chatcmpl_tools;
+        std::unordered_set<std::string> chatcmpl_tool_names;
+        json namespace_tool_map = json::object();
+
+        auto add_function_tool = [&](json resp_function, const std::string & namespace_name) {
+            const std::string original_name = json_value(resp_function, "name", std::string());
+            if (original_name.empty()) {
+                throw std::invalid_argument("Responses function tool requires 'name'");
+            }
+
+            std::string chatcmpl_name = original_name;
+            if (!namespace_name.empty()) {
+                chatcmpl_name = flatten_responses_namespace_tool_name(namespace_name, original_name);
+                namespace_tool_map[chatcmpl_name] = {
+                    {"namespace", namespace_name},
+                    {"name",      original_name},
+                };
+            }
+            if (!chatcmpl_tool_names.insert(chatcmpl_name).second) {
+                throw std::invalid_argument("Duplicate Responses tool name after namespace flattening: " + chatcmpl_name);
+            }
+
+            resp_function.erase("type");
+            resp_function["name"] = chatcmpl_name;
+            if (!resp_function.contains("strict")) {
+                resp_function["strict"] = true;
+            }
+            chatcmpl_tools.push_back({
+                {"type",     "function"},
+                {"function", std::move(resp_function)},
+            });
+        };
+
         for (json resp_tool : response_body.at("tools")) {
-            json chatcmpl_tool;
-
             const std::string type = json_value(resp_tool, "type", std::string());
-            if (type != "function") {
-                // Non-function Responses tools have no Chat Completions equivalent.
+            if (type == "function") {
+                add_function_tool(std::move(resp_tool), "");
+            } else if (type == "namespace") {
+                const std::string namespace_name = json_value(resp_tool, "name", std::string());
+                if (namespace_name.empty() || !resp_tool.contains("tools") || !resp_tool.at("tools").is_array()) {
+                    SRV_WRN("%s\n", "malformed Responses namespace tool skipped");
+                    continue;
+                }
+                for (json namespace_tool : resp_tool.at("tools")) {
+                    const std::string namespace_tool_type = json_value(namespace_tool, "type", std::string());
+                    if (namespace_tool_type != "function") {
+                        SRV_WRN(
+                            "unsupported Responses namespace child tool type '%s' skipped\n",
+                            namespace_tool_type.c_str());
+                        continue;
+                    }
+                    add_function_tool(std::move(namespace_tool), namespace_name);
+                }
+            } else {
+                // Other Responses tools have no Chat Completions equivalent.
                 SRV_WRN("unsupported Responses tool type '%s' skipped\n", type.c_str());
-                continue;
             }
-            resp_tool.erase("type");
-            chatcmpl_tool["type"] = "function";
-
-            if (!resp_tool.contains("strict")) {
-                resp_tool["strict"] = true;
-            }
-            chatcmpl_tool["function"] = resp_tool;
-            chatcmpl_tools.push_back(chatcmpl_tool);
         }
         chatcmpl_body.erase("tools");
         if (!chatcmpl_tools.empty()) {
             chatcmpl_body["tools"] = chatcmpl_tools;
+        }
+        if (!namespace_tool_map.empty()) {
+            chatcmpl_body[SERVER_RESPONSES_NAMESPACE_TOOL_MAP_KEY] = std::move(namespace_tool_map);
         }
     }
 

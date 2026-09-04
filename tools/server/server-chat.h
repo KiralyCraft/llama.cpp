@@ -8,8 +8,13 @@
 
 #include "json.h"
 
+inline constexpr char SERVER_RESPONSES_NAMESPACE_TOOL_MAP_KEY[] = "__responses_namespace_tool_map";
+
 // Convert OpenAI Responses API format to OpenAI Chat Completions API format
 json server_chat_convert_responses_to_chatcmpl(const json & body);
+
+// Restore a Responses API namespace tool call after the chat parser returns its flattened name.
+void server_chat_restore_responses_tool_namespace(json & tool_call, const json & namespace_tool_map);
 
 // Convert Anthropic Messages API format to OpenAI Chat Completions API format
 json server_chat_convert_anthropic_to_oai(const json & body);

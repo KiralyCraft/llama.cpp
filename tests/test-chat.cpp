@@ -1974,6 +1974,74 @@ static void test_convert_responses_to_chatcmpl() {
 
         assert_equals(false, result.contains("tools"));
     }
+
+    // Test Responses namespace tools are flattened for chat templates and restored for Responses output
+    {
+        json input = json::parse(R"({
+            "input": [
+                {
+                    "type": "function_call",
+                    "namespace": "mcp__chrome_devtools",
+                    "name": "list_pages",
+                    "arguments": "{}",
+                    "call_id": "call_previous"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_previous",
+                    "output": "New Tab"
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": "List the pages again"
+                }
+            ],
+            "model": "test-model",
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__chrome_devtools",
+                    "description": "Tools in the mcp__chrome_devtools namespace.",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "list_pages",
+                            "description": "List open pages",
+                            "strict": false,
+                            "parameters": {
+                                "type": "object",
+                                "properties": {}
+                            }
+                        }
+                    ]
+                }
+            ]
+        })");
+
+        json result = server_chat_convert_responses_to_chatcmpl(input);
+
+        assert_equals((size_t)1, result.at("tools").size());
+        assert_equals(
+            std::string("mcp__chrome_devtools__list_pages"),
+            result.at("tools")[0].at("function").at("name").get<std::string>());
+        assert_equals(
+            std::string("mcp__chrome_devtools__list_pages"),
+            result.at("messages")[0].at("tool_calls")[0].at("function").at("name").get<std::string>());
+
+        const json & namespace_tool_map = result.at(SERVER_RESPONSES_NAMESPACE_TOOL_MAP_KEY);
+        json response_tool_call = {
+            {"type",      "function_call"},
+            {"name",      "mcp__chrome_devtools__list_pages"},
+            {"arguments", "{}"},
+            {"call_id",   "call_new"},
+        };
+        server_chat_restore_responses_tool_namespace(response_tool_call, namespace_tool_map);
+        assert_equals(
+            std::string("mcp__chrome_devtools"),
+            response_tool_call.at("namespace").get<std::string>());
+        assert_equals(std::string("list_pages"), response_tool_call.at("name").get<std::string>());
+    }
 }
 
 // Shared LFM2 parser cases - all variants use one output format and parser

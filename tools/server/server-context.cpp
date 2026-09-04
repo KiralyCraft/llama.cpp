@@ -2072,6 +2072,7 @@ private:
         res->res_type          = slot.task->params.res_type;
         res->oaicompat_model   = slot.task->params.oaicompat_model;
         res->oaicompat_cmpl_id = slot.task->params.oaicompat_cmpl_id;
+        res->oai_resp_namespace_tool_map = slot.task->params.oai_resp_namespace_tool_map;
 
         // populate res.probs_output
         if (slot.task->params.sampling.n_probs > 0) {
@@ -2127,6 +2128,7 @@ private:
         res->res_type          = slot.task->params.res_type;
         res->oaicompat_model   = slot.task->params.oaicompat_model;
         res->oaicompat_cmpl_id = slot.task->params.oaicompat_cmpl_id;
+        res->oai_resp_namespace_tool_map = slot.task->params.oai_resp_namespace_tool_map;
 
         // populate res.probs_output
         if (slot.task->params.sampling.n_probs > 0) {
@@ -4311,6 +4313,10 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             task.params.res_type          = res_type;
             task.params.oaicompat_cmpl_id = completion_id;
             task.params.oaicompat_model   = meta->model_name;
+            task.params.oai_resp_namespace_tool_map = json_value(
+                data,
+                SERVER_RESPONSES_NAMESPACE_TOOL_MAP_KEY,
+                json::object());
 
             // prepare child tasks
             if (task.params.n_cmpl > 1) {
