@@ -188,6 +188,47 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
                     item["content"] = chatcmpl_content;
                     chatcmpl_messages.push_back(item);
                 }
+            } else if (exists_and_is_array(item, "content") &&
+                exists_and_is_string(item, "author") &&
+                exists_and_is_string(item, "recipient") &&
+                exists_and_is_string(item, "type") &&
+                item.at("type") == "agent_message"
+            ) {
+                // Codex uses agent_message for inbound inter-agent communication.
+                // Chat Completions has no equivalent role, so present it to the
+                // receiving model as user input while preserving every content
+                // part in order. Custom providers may carry the task payload in
+                // encrypted_content even when the value itself is plaintext.
+                auto chatcmpl_content = json::array();
+
+                for (const json & content_part : item.at("content")) {
+                    const std::string type = json_value(content_part, "type", std::string());
+
+                    if (type == "input_text") {
+                        if (!exists_and_is_string(content_part, "text")) {
+                            throw std::invalid_argument("'Agent input text' requires 'text'");
+                        }
+                        chatcmpl_content.push_back({
+                            {"text", content_part.at("text")},
+                            {"type", "text"},
+                        });
+                    } else if (type == "encrypted_content") {
+                        if (!exists_and_is_string(content_part, "encrypted_content")) {
+                            throw std::invalid_argument("'Agent encrypted content' requires 'encrypted_content'");
+                        }
+                        chatcmpl_content.push_back({
+                            {"text", content_part.at("encrypted_content")},
+                            {"type", "text"},
+                        });
+                    } else {
+                        throw std::invalid_argument("'Agent message type' must be one of 'input_text' or 'encrypted_content'");
+                    }
+                }
+
+                chatcmpl_messages.push_back({
+                    {"role",    "user"},
+                    {"content", chatcmpl_content},
+                });
             } else if (exists_and_is_string(item, "arguments") &&
                 exists_and_is_string(item, "call_id") &&
                 exists_and_is_string(item, "name") &&

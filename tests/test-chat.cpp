@@ -1867,6 +1867,49 @@ static void test_convert_responses_to_chatcmpl() {
         assert_equals(std::string("Hello, world!"), msg.at("content").get<std::string>());
     }
 
+    // Test Codex inter-agent messages
+    {
+        json input = json::parse(R"({
+            "input": [
+                {
+                    "type": "agent_message",
+                    "id": "amsg_test",
+                    "author": "/root",
+                    "recipient": "/root/researcher",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "Message Type: NEW_TASK\nTask name: /root/researcher\nSender: /root\nPayload:\n"
+                        },
+                        {
+                            "type": "encrypted_content",
+                            "encrypted_content": "Verify the external contracts."
+                        }
+                    ],
+                    "internal_chat_message_metadata_passthrough": {
+                        "turn_id": "turn_test"
+                    }
+                }
+            ],
+            "model": "test-model"
+        })");
+
+        json result = server_chat_convert_responses_to_chatcmpl(input);
+
+        assert_equals((size_t)1, result.at("messages").size());
+        const auto & msg = result.at("messages")[0];
+        assert_equals(std::string("user"), msg.at("role").get<std::string>());
+        assert_equals((size_t)2, msg.at("content").size());
+        assert_equals(std::string("text"), msg.at("content")[0].at("type").get<std::string>());
+        assert_equals(
+            std::string("Message Type: NEW_TASK\nTask name: /root/researcher\nSender: /root\nPayload:\n"),
+            msg.at("content")[0].at("text").get<std::string>());
+        assert_equals(std::string("text"), msg.at("content")[1].at("type").get<std::string>());
+        assert_equals(
+            std::string("Verify the external contracts."),
+            msg.at("content")[1].at("text").get<std::string>());
+    }
+
     // Test with instructions (system message)
     {
         json input = json::parse(R"({
