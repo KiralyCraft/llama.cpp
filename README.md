@@ -17,6 +17,16 @@
 
 </div>
 
+## Codex compatibility fork
+
+This fork contains `llama-server` compatibility fixes specifically for use with Codex through the Responses API, including:
+
+- Namespaced tool definitions and calls, including MCP tools.
+- Codex inter-agent messages (`agent_message`).
+- Image-bearing tool results, such as screenshots returned by `view_image`, while preserving text/image order and tool-call IDs.
+
+Build from this fork's source to include these fixes; the upstream download links below do not provide this fork's build. Image input still requires a vision-capable model and its multimodal projector. These fixes do not imply full support for every Codex or OpenAI API feature; see the [server documentation](tools/server/README.md) for details.
+
 ## Quick start
 
 A few options to get `llama.cpp` installed on your machine:
