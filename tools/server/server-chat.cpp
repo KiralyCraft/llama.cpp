@@ -279,10 +279,26 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
                 } else {
                     json chatcmpl_outputs = item.at("output");
                     for (json & chatcmpl_output : chatcmpl_outputs) {
-                        if (!chatcmpl_output.contains("type") || chatcmpl_output.at("type") != "input_text") {
-                            throw std::invalid_argument("Output of tool call should be 'Input text'");
+                        if (exists_and_is_string(chatcmpl_output, "type") && chatcmpl_output.at("type") == "input_text") {
+                            if (!exists_and_is_string(chatcmpl_output, "text")) {
+                                throw std::invalid_argument("'Input text' requires a string 'text'");
+                            }
+                            chatcmpl_output["type"] = "text";
+                        } else if (exists_and_is_string(chatcmpl_output, "type") && chatcmpl_output.at("type") == "input_image") {
+                            if (!exists_and_is_string(chatcmpl_output, "image_url")) {
+                                throw std::invalid_argument("'Input image' requires a string 'image_url'");
+                            }
+                            json image_url = {{"url", chatcmpl_output.at("image_url")}};
+                            if (chatcmpl_output.contains("detail")) {
+                                if (!exists_and_is_string(chatcmpl_output, "detail")) {
+                                    throw std::invalid_argument("'Input image' requires a string 'detail'");
+                                }
+                                image_url["detail"] = chatcmpl_output.at("detail");
+                            }
+                            chatcmpl_output = {{"type", "image_url"}, {"image_url", image_url}};
+                        } else {
+                            throw std::invalid_argument("Tool output content must be 'input_text' or 'input_image'");
                         }
-                        chatcmpl_output["type"] = "text";
                     }
                     chatcmpl_messages.push_back(json {
                         {"content",      chatcmpl_outputs},

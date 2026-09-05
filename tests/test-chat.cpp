@@ -1941,6 +1941,98 @@ static void test_convert_responses_to_chatcmpl() {
         assert_equals(100, result.at("max_tokens").get<int>());
     }
 
+    // Tool results keep ordered text and image content, including adjacent results.
+    {
+        const json cases = json::parse(R"([
+            {"output": "done", "content": "done"},
+            {"output": [], "content": []},
+            {"output": [{"type": "input_text", "text": "done"}],
+             "content": [{"type": "text", "text": "done"}]},
+            {"output": [{"type": "input_image", "image_url": "data:image/png;base64,first"}],
+             "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,first"}}]},
+            {"output": [
+                {"type": "input_text", "text": "before"},
+                {"type": "input_image", "image_url": "data:image/png;base64,first", "detail": "high"},
+                {"type": "input_text", "text": "between"},
+                {"type": "input_image", "image_url": "data:image/png;base64,second", "detail": "auto"},
+                {"type": "input_text", "text": "after"}
+             ], "content": [
+                {"type": "text", "text": "before"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,first", "detail": "high"}},
+                {"type": "text", "text": "between"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,second", "detail": "auto"}},
+                {"type": "text", "text": "after"}
+             ]}
+        ])");
+        for (const auto & test_case : cases) {
+            json input = json::parse(R"({"input": [
+                {"type": "function_call", "call_id": "first", "name": "view_image", "arguments": "{}"},
+                {"type": "function_call", "call_id": "second", "name": "view_image", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "first", "output": ""},
+                {"type": "function_call_output", "call_id": "second", "output": ""}
+            ]})");
+            input["input"][2]["output"] = test_case.at("output");
+            input["input"][3]["output"] = test_case.at("output");
+            const json original = input;
+            const json result = server_chat_convert_responses_to_chatcmpl(input);
+            assert_equals(true, original == input);
+            assert_equals((size_t)3, result.at("messages").size());
+            assert_equals((size_t)2, result.at("messages")[0].at("tool_calls").size());
+            for (size_t i = 1; i < 3; ++i) {
+                const auto & message = result.at("messages")[i];
+                assert_equals(std::string("tool"), message.at("role").get<std::string>());
+                assert_equals(std::string(i == 1 ? "first" : "second"), message.at("tool_call_id").get<std::string>());
+                const auto & expected = test_case.at("content");
+                const auto & actual = message.at("content");
+                assert_equals(expected.is_array(), actual.is_array());
+                if (expected.is_string()) {
+                    assert_equals(expected.get<std::string>(), actual.get<std::string>());
+                    continue;
+                }
+                assert_equals(expected.size(), actual.size());
+                for (size_t j = 0; j < expected.size(); ++j) {
+                    const std::string type = expected[j].at("type").get<std::string>();
+                    assert_equals(type, actual[j].at("type").get<std::string>());
+                    if (type == "text") {
+                        assert_equals(expected[j].at("text").get<std::string>(), actual[j].at("text").get<std::string>());
+                    } else {
+                        assert_equals(expected[j].at("image_url").dump(), actual[j].at("image_url").dump());
+                    }
+                }
+            }
+        }
+    }
+
+    // Malformed and unsupported tool content must not be silently dropped.
+    {
+        const json cases = json::parse(R"([
+            {}, null, "image",
+            {"type": 1},
+            {"type": "input_text"},
+            {"type": "input_text", "text": 1},
+            {"type": "input_image"},
+            {"type": "input_image", "image_url": null},
+            {"type": "input_image", "image_url": {"url": "image.png"}},
+            {"type": "input_image", "image_url": "image.png", "detail": 1},
+            {"type": "input_file", "file_id": "file_test"},
+            {"type": "unknown"}
+        ])");
+        for (const auto & content : cases) {
+            const json input = {{"input", json::array({{
+                {"type", "function_call_output"},
+                {"call_id", "test"},
+                {"output", json::array({content})},
+            }})}};
+            bool rejected = false;
+            try {
+                server_chat_convert_responses_to_chatcmpl(input);
+            } catch (const std::invalid_argument &) {
+                rejected = true;
+            }
+            assert_equals(true, rejected);
+        }
+    }
+
     // Test mixed Responses tools: convert only function tools
     {
         json input = json::parse(R"({

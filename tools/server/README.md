@@ -1502,6 +1502,8 @@ curl http://localhost:8080/v1/responses \
 
 This endpoint works by converting Responses request into Chat Completions request.
 
+Function tool results (`function_call_output.output`) can be strings or ordered arrays of `input_text` and `input_image` content. Images require `image_url` (a URL or base64 data URL) and a vision-capable model with a multimodal projector. The tool call ID and content order are preserved; image `file_id` references and `input_file` tool results are not supported.
+
 
 ### POST `/v1/embeddings`: OpenAI-compatible embeddings API
 
